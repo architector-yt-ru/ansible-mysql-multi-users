@@ -1,0 +1,57 @@
+---
+
+# - name: "({{instance.mysql_name}}) Check read_only option"
+#   mysql_variables:
+#     config_file: "{{ instance.mysql_config }}"
+#     variable: read_only
+#   register: __mysql_read_only
+#   check_mode: false
+
+- name: Debug
+  debug: 
+    var: "{{item}}"
+    verbosity: 1
+  delegate_to: 127.0.0.1
+  run_once: true
+  with_items: 
+    - instance
+  tags: [ mysql-multi-users, configs, mysql-grants ]
+
+- name: "({{instance.mysql_name}}) Check read_only option"
+  shell: "mysql --defaults-file={{ instance.mysql_config }} -e 'select @@global.read_only' -N"
+  register: __mysql_read_only
+  check_mode: false
+  changed_when: false
+  tags: [ mysql-multi-users, configs, mysql-grants ]
+
+- name: "({{instance.mysql_name}}) Creating databases (when: read_only=0)"
+  mysql_db:
+    config_file: "{{ instance.mysql_config }}"
+    name: "{{ item }}"
+    state: present
+  with_items: 
+    - "{{ mysql_multi_users['*'].databases|default([]) }}"
+    - "{{ instance.databases|default([]) }}"
+  when: 
+    # - __mysql_read_only.msg == "OFF"
+    - __mysql_read_only.stdout == "0"
+  loop_control:
+    label: "Database: {{ item }}"
+  tags: [ mysql-multi-users, configs, mysql-grants ]
+
+- name: "({{instance.mysql_name}}) Creating users"
+  mysql_user:
+    config_file: "{{ instance.mysql_config }}"
+    name: "{{ item.login }}"
+    password: "{{ item.pass }}"
+    priv: "{{ item.priv }}"
+    encrypted: "{{ 'yes' if item.pass|length == 41 and item.pass[:1] == '*' else 'no' }}"
+    state: present
+    host: '%'
+    sql_log_bin : no
+  with_items: 
+    - "{{ mysql_multi_users['*'].users|default([]) }}"
+    - "{{ instance.users|default([]) }}"
+  loop_control:
+    label: "User: {{ item.login }}, priv: {{ item.priv }}"
+  tags: [ mysql-multi-users, configs, mysql-grants ]
